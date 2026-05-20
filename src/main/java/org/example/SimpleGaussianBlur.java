@@ -7,48 +7,43 @@ import org.jocl.*;
 import static org.jocl.CL.*;
 
 public class SimpleGaussianBlur {
+
     public static void main(String[] args) {
         String inputPath = "input/shuttle.jpg";
-        String outputPath = "output/shuttle_blurred.jpg"; // Aktuell noch Platzhalter
+        String outputPath = "output/shuttle_blurred.jpg";
 
+        // Load input image
         BufferedImage image = null;
         try {
             image = ImageIO.read(new File(inputPath));
             if (image == null) {
-                System.err.println("Fehler: Konnte Bild nicht lesen. Existiert " + inputPath + "?");
+                System.err.println("Could not read image: " + inputPath);
                 return;
             }
         } catch (IOException e) {
-            System.err.println("Fehler beim Laden des Bildes: " + e.getMessage());
+            System.err.println("Error loading image: " + e.getMessage());
             return;
         }
 
         int width = image.getWidth();
         int height = image.getHeight();
+        System.out.println("Image loaded: " + width + "x" + height);
 
-        // Convert pixels from Java int[] (ARGB) to byte[] (RGBA)
-        // Java's getRGB returns each pixel as one int: 0xAARRGGBB
-        // The kernel expects raw bytes: R, G, B, A per pixel
+        // Convert int[] ARGB to byte[] RGBA for the kernel
         int[] argbPixels = image.getRGB(0, 0, width, height, null, 0, width);
         byte[] inputPixels = new byte[width * height * 4];
         for (int i = 0; i < argbPixels.length; i++) {
             int pixel = argbPixels[i];
-            inputPixels[i * 4 + 0] = (byte) ((pixel >> 16) & 0xFF); // R
+            inputPixels[i * 4]     = (byte) ((pixel >> 16) & 0xFF); // R
             inputPixels[i * 4 + 1] = (byte) ((pixel >> 8) & 0xFF);  // G
             inputPixels[i * 4 + 2] = (byte) (pixel & 0xFF);         // B
             inputPixels[i * 4 + 3] = (byte) ((pixel >> 24) & 0xFF); // A
         }
         byte[] outputPixels = new byte[width * height * 4];
-        System.out.println(argbPixels.length + " Pixel geladen.");
 
-        // ===== OpenCL Setup =====
-
-        // Step 0: Enable exceptions so OpenCL errors become Java exceptions
+        // OpenCL setup
         CL.setExceptionsEnabled(true);
 
-        // Step 1: Get a platform
-        // A "platform" = an OpenCL implementation installed on this machine
-        // (e.g. Apple's, NVIDIA's, Intel's). We just take the first one
         int[] numPlatformsArray = new int[1];
         clGetPlatformIDs(0, null, numPlatformsArray);
         if (numPlatformsArray[0] == 0) {
@@ -59,7 +54,6 @@ public class SimpleGaussianBlur {
         clGetPlatformIDs(1, platforms, null);
         cl_platform_id platform = platforms[0];
 
-        // Step 2: Get a device
         int[] numDevicesArray = new int[1];
         clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, null, numDevicesArray);
         if (numDevicesArray[0] == 0) {
@@ -70,28 +64,16 @@ public class SimpleGaussianBlur {
         clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevicesArray[0], devices, null);
         cl_device_id device = devices[0];
 
-        // Step 3: Create a context
-        // A "context" groups together a device + its memory objects + programs
         cl_context context = clCreateContext(null, 1, new cl_device_id[]{device}, null, null, null);
-
-        // Step 4: Create a command queue
-        // The queue is how we send instructions to the device
-        // Commands execute in order (FIFO)
         cl_command_queue commandQueue = clCreateCommandQueue(context, device, 0, null);
 
-        // Step 5: Load the kernel source code from a .cl file, compile it
-        // Note: placeholder for now, we will read the actual kernel source from a file later
         String programSource = readKernelSource("src/main/java/at/fhtw/blur.cl");
         cl_program program = clCreateProgramWithSource(context, 1, new String[]{programSource}, null, null);
         clBuildProgram(program, 0, null, null, null, null);
 
-        // Step 6: Create the kernel
-        // A program can contain multiple __kernel functions
-        // clCreateKernel picks one by name — this must match the function name in the .cl file
         cl_kernel kernel = clCreateKernel(program, "gaussianBlur2D", null);
 
-        // Step 7: Query device capabilities (required by the assignment)
-        // We need to check max work group size and max work item sizes to make sure our 2D NDRange (width x height) is valid
+        // Query and validate device capabilities
         long[] maxWorkGroupSize = new long[1];
         clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.cl_long, Pointer.to(maxWorkGroupSize), null);
         System.out.println("Max work group size: " + maxWorkGroupSize[0]);
@@ -105,8 +87,7 @@ public class SimpleGaussianBlur {
 
         if (width > maxWorkItemSizes[0] || height > maxWorkItemSizes[1]) {
             System.err.println("Image dimensions (" + width + "x" + height
-                    + ") exceed device max work item sizes ("
-                    + maxWorkItemSizes[0] + "x" + maxWorkItemSizes[1] + ")!");
+                    + ") exceed device limits (" + maxWorkItemSizes[0] + "x" + maxWorkItemSizes[1] + ")!");
             clReleaseKernel(kernel);
             clReleaseProgram(program);
             clReleaseCommandQueue(commandQueue);
@@ -114,16 +95,9 @@ public class SimpleGaussianBlur {
             return;
         }
 
-        // ===== Create Buffers =====
-        // GPU can't access Java arrays directly. We need to:
-        //   1. Wrap Java arrays in JOCL "Pointer" objects
-        //   2. Allocate memory on the GPU ("buffers")
-        //   3. Copy data from Java → GPU buffer
-
+        // Create buffers and upload input data to GPU
         Pointer ptrInputPixels = Pointer.to(inputPixels);
         Pointer ptrOutputPixels = Pointer.to(outputPixels);
-
-        // 4 bytes per pixel (RGBA), so total size = width * height * 4
         long pixelBufferSize = (long) width * height * 4;
 
         cl_mem inputBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, pixelBufferSize, null, null);
@@ -131,34 +105,30 @@ public class SimpleGaussianBlur {
 
         clEnqueueWriteBuffer(commandQueue, inputBuffer, CL_TRUE, 0, pixelBufferSize, ptrInputPixels, 0, null, null);
 
-        // ===== Set Kernel Arguments =====
-        // gaussianBlur2D(inputImage, outputImage, width, height)
+        // Set kernel arguments: gaussianBlur2D(inputImage, outputImage, width, height)
         clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputBuffer));
         clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputBuffer));
         clSetKernelArg(kernel, 2, Sizeof.cl_int, Pointer.to(new int[]{width}));
         clSetKernelArg(kernel, 3, Sizeof.cl_int, Pointer.to(new int[]{height}));
 
-        // ===== Execute the Kernel =====
-        // 2D NDRange: one work item per pixel (width x height)
-        // Each work item computes one output pixel
+        // Execute kernel with 2D NDRange (one work item per pixel)
         long[] globalWorkSize = new long[]{width, height};
         clEnqueueNDRangeKernel(commandQueue, kernel, 2, null, globalWorkSize, null, 0, null, null);
 
-        // ===== Read Back Results =====
+        // Read results back from GPU
         clEnqueueReadBuffer(commandQueue, outputBuffer, CL_TRUE, 0, pixelBufferSize, ptrOutputPixels, 0, null, null);
 
-        // ===== Save the Output Image =====
-        // Convert byte[] (RGBA) back to int[] (ARGB) for Java's BufferedImage
+        // Convert byte[] RGBA back to int[] ARGB and save
         int[] resultPixels = new int[width * height];
         for (int i = 0; i < resultPixels.length; i++) {
-            int r = outputPixels[i * 4 + 0] & 0xFF;
+            int r = outputPixels[i * 4]     & 0xFF;
             int g = outputPixels[i * 4 + 1] & 0xFF;
             int b = outputPixels[i * 4 + 2] & 0xFF;
             int a = outputPixels[i * 4 + 3] & 0xFF;
             resultPixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
         }
 
-        BufferedImage outputImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage outputImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         outputImage.setRGB(0, 0, width, height, resultPixels, 0, width);
         try {
             ImageIO.write(outputImage, "jpg", new File(outputPath));
@@ -167,7 +137,7 @@ public class SimpleGaussianBlur {
             System.err.println("Error saving output image: " + e.getMessage());
         }
 
-        // Cleanup: release all OpenCL resources in reverse order
+        // Cleanup
         clReleaseMemObject(inputBuffer);
         clReleaseMemObject(outputBuffer);
         clReleaseKernel(kernel);
