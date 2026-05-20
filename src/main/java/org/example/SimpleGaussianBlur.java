@@ -103,6 +103,17 @@ public class SimpleGaussianBlur {
         clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, maxWorkItemDimensions[0] * Sizeof.cl_long, Pointer.to(maxWorkItemSizes), null);
         System.out.println("Max work item sizes: dim0=" + maxWorkItemSizes[0] + " dim1=" + maxWorkItemSizes[1]);
 
+        if (width > maxWorkItemSizes[0] || height > maxWorkItemSizes[1]) {
+            System.err.println("Image dimensions (" + width + "x" + height
+                    + ") exceed device max work item sizes ("
+                    + maxWorkItemSizes[0] + "x" + maxWorkItemSizes[1] + ")!");
+            clReleaseKernel(kernel);
+            clReleaseProgram(program);
+            clReleaseCommandQueue(commandQueue);
+            clReleaseContext(context);
+            return;
+        }
+
         // ===== Create Buffers =====
         // GPU can't access Java arrays directly. We need to:
         //   1. Wrap Java arrays in JOCL "Pointer" objects
