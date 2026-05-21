@@ -1,4 +1,5 @@
-package org.example;
+package at.fhtw;
+
 
 import org.jocl.CL;
 
