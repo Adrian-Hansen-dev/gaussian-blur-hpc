@@ -1,4 +1,4 @@
-package org.example;
+package at.fhtw;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -78,7 +78,7 @@ public class SimpleGaussianBlur {
         clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.cl_long, Pointer.to(maxWorkGroupSize), null);
         System.out.println("Max work group size: " + maxWorkGroupSize[0]);
 
-        long[] maxWorkItemDimensions = new long[1];
+        /*long[] maxWorkItemDimensions = new long[1];
         clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, Sizeof.cl_long, Pointer.to(maxWorkItemDimensions), null);
 
         long[] maxWorkItemSizes = new long[(int) maxWorkItemDimensions[0]];
@@ -95,6 +95,9 @@ public class SimpleGaussianBlur {
             return;
         }
 
+
+
+         */
         // Create buffers and upload input data to GPU
         Pointer ptrInputPixels = Pointer.to(inputPixels);
         Pointer ptrOutputPixels = Pointer.to(outputPixels);
