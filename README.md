@@ -18,7 +18,7 @@ A Java/OpenCL project using JOCL for GPU-accelerated image processing.
 
 > To verify OpenCL is available on your system, you can use [GPU-Z](https://www.techpowerup.com/gpuz/) or [CPU-Z](https://www.cpuid.com/softwares/cpu-z.html) and check the OpenCL entry under the Graphics tab.
 
-## Running
+## Testing Your Setup
 
 ### Windows (Command Prompt or PowerShell)
 
@@ -37,7 +37,23 @@ Expected output if everything is set up correctly:
 ```
 Erfolgreich geladen!
 Gefundene OpenCL Plattformen: 1
-Dein Setup ist perfekt. Du kannst jetzt OpenCL programmieren.
+Dein Setup funktioniert.
 ```
 
 If you see `0 Plattformen`, your GPU drivers are missing or do not expose an OpenCL runtime.
+
+## Running the Gaussian Blur Application
+
+### Windows (Command Prompt or PowerShell)
+
+```cmd
+mvn compile exec:java -Dexec.mainClass="at.fhtw.SimpleGaussianBlur"
+```
+
+### macOS / Linux
+
+```bash
+mvn compile exec:java -Dexec.mainClass="at.fhtw.SimpleGaussianBlur"
+```
+
+The blurred image will be saved in the `output` directory.
