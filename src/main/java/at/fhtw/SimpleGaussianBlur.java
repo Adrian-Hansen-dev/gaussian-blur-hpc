@@ -78,26 +78,7 @@ public class SimpleGaussianBlur {
         clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.cl_long, Pointer.to(maxWorkGroupSize), null);
         System.out.println("Max work group size: " + maxWorkGroupSize[0]);
 
-        /*long[] maxWorkItemDimensions = new long[1];
-        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, Sizeof.cl_long, Pointer.to(maxWorkItemDimensions), null);
-
-        long[] maxWorkItemSizes = new long[(int) maxWorkItemDimensions[0]];
-        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, maxWorkItemDimensions[0] * Sizeof.cl_long, Pointer.to(maxWorkItemSizes), null);
-        System.out.println("Max work item sizes: dim0=" + maxWorkItemSizes[0] + " dim1=" + maxWorkItemSizes[1]);
-
-        if (width > maxWorkItemSizes[0] || height > maxWorkItemSizes[1]) {
-            System.err.println("Image dimensions (" + width + "x" + height
-                    + ") exceed device limits (" + maxWorkItemSizes[0] + "x" + maxWorkItemSizes[1] + ")!");
-            clReleaseKernel(kernel);
-            clReleaseProgram(program);
-            clReleaseCommandQueue(commandQueue);
-            clReleaseContext(context);
-            return;
-        }
-
-
-
-         */
+       
         // Create buffers and upload input data to GPU
         Pointer ptrInputPixels = Pointer.to(inputPixels);
         Pointer ptrOutputPixels = Pointer.to(outputPixels);
