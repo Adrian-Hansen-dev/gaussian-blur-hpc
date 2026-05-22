@@ -23,13 +23,13 @@ A Java/OpenCL project using JOCL for GPU-accelerated image processing.
 ### Windows (Command Prompt or PowerShell)
 
 ```cmd
-mvn compile exec:java -Dexec.mainClass="org.example.JOCLSetupTest"
+mvn compile exec:java -Dexec.mainClass="at.fhtw.JOCLSetupTest"
 ```
 
 ### macOS / Linux
 
 ```bash
-mvn compile exec:java -Dexec.mainClass="org.example.JOCLSetupTest"
+mvn compile exec:java -Dexec.mainClass="at.fhtw.JOCLSetupTest"
 ```
 
 Expected output if everything is set up correctly:
