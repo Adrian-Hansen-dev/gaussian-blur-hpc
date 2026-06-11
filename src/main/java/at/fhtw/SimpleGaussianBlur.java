@@ -8,6 +8,13 @@ import static org.jocl.CL.*;
 
 public class SimpleGaussianBlur {
 
+    private static final int KERNEL_SIZE = 9;
+
+    private static final float[] GAUSSIAN_KERNEL_1D = {
+        0.028532f, 0.067234f, 0.124009f, 0.179044f, 0.202363f,
+        0.179044f, 0.124009f, 0.067234f, 0.028532f
+    };
+
     public static void main(String[] args) {
         String inputPath = "input/shuttle.jpg";
         String outputPath = "output/shuttle_blurred.jpg";
@@ -34,10 +41,10 @@ public class SimpleGaussianBlur {
         byte[] inputPixels = new byte[width * height * 4];
         for (int i = 0; i < argbPixels.length; i++) {
             int pixel = argbPixels[i];
-            inputPixels[i * 4]     = (byte) ((pixel >> 16) & 0xFF); // R
-            inputPixels[i * 4 + 1] = (byte) ((pixel >> 8) & 0xFF);  // G
-            inputPixels[i * 4 + 2] = (byte) (pixel & 0xFF);         // B
-            inputPixels[i * 4 + 3] = (byte) ((pixel >> 24) & 0xFF); // A
+            inputPixels[i * 4]     = (byte) ((pixel >> 16) & 0xFF);
+            inputPixels[i * 4 + 1] = (byte) ((pixel >> 8) & 0xFF);
+            inputPixels[i * 4 + 2] = (byte) (pixel & 0xFF);
+            inputPixels[i * 4 + 3] = (byte) ((pixel >> 24) & 0xFF);
         }
         byte[] outputPixels = new byte[width * height * 4];
 
@@ -64,6 +71,23 @@ public class SimpleGaussianBlur {
         clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevicesArray[0], devices, null);
         cl_device_id device = devices[0];
 
+        long[] maxWorkGroupSize = new long[1];
+        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.cl_long, Pointer.to(maxWorkGroupSize), null);
+        System.out.println("Max work group size: " + maxWorkGroupSize[0]);
+
+        if (width > maxWorkGroupSize[0]) {
+            System.err.println("Image width (" + width
+                    + ") exceeds max work group size (" + maxWorkGroupSize[0]
+                    + "). Cannot process this image.");
+            return;
+        }
+        if (height > maxWorkGroupSize[0]) {
+            System.err.println("Image height (" + height
+                    + ") exceeds max work group size (" + maxWorkGroupSize[0]
+                    + "). Cannot process this image.");
+            return;
+        }
+
         cl_context context = clCreateContext(null, 1, new cl_device_id[]{device}, null, null, null);
         cl_command_queue commandQueue = clCreateCommandQueue(context, device, 0, null);
 
@@ -71,38 +95,53 @@ public class SimpleGaussianBlur {
         cl_program program = clCreateProgramWithSource(context, 1, new String[]{programSource}, null, null);
         clBuildProgram(program, 0, null, null, null, null);
 
-        cl_kernel kernel = clCreateKernel(program, "gaussianBlur2D", null);
+        cl_kernel kernel = clCreateKernel(program, "gaussianBlur1D", null);
 
-        // Query and validate device capabilities
-        long[] maxWorkGroupSize = new long[1];
-        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.cl_long, Pointer.to(maxWorkGroupSize), null);
-        System.out.println("Max work group size: " + maxWorkGroupSize[0]);
-
-       
-        // Create buffers and upload input data to GPU
-        Pointer ptrInputPixels = Pointer.to(inputPixels);
-        Pointer ptrOutputPixels = Pointer.to(outputPixels);
         long pixelBufferSize = (long) width * height * 4;
 
         cl_mem inputBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, pixelBufferSize, null, null);
+        cl_mem intermediateBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, pixelBufferSize, null, null);
         cl_mem outputBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, pixelBufferSize, null, null);
 
-        clEnqueueWriteBuffer(commandQueue, inputBuffer, CL_TRUE, 0, pixelBufferSize, ptrInputPixels, 0, null, null);
+        clEnqueueWriteBuffer(commandQueue, inputBuffer, CL_TRUE, 0,
+                pixelBufferSize, Pointer.to(inputPixels), 0, null, null);
 
-        // Set kernel arguments: gaussianBlur2D(inputImage, outputImage, width, height)
+        cl_mem filterBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                (long) KERNEL_SIZE * Sizeof.cl_float, Pointer.to(GAUSSIAN_KERNEL_1D), null);
+
+        long[] globalWorkSize = new long[]{width, height};
+
+        // Pass 1: horizontal blur (work group = one row)
+        long[] localWorkSizeH = new long[]{width, 1};
+        long localMemSizeH = (long) width * 4;
+
         clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputBuffer));
-        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputBuffer));
+        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(intermediateBuffer));
         clSetKernelArg(kernel, 2, Sizeof.cl_int, Pointer.to(new int[]{width}));
         clSetKernelArg(kernel, 3, Sizeof.cl_int, Pointer.to(new int[]{height}));
+        clSetKernelArg(kernel, 4, Sizeof.cl_mem, Pointer.to(filterBuffer));
+        clSetKernelArg(kernel, 5, Sizeof.cl_int, Pointer.to(new int[]{KERNEL_SIZE}));
+        clSetKernelArg(kernel, 6, Sizeof.cl_int, Pointer.to(new int[]{1}));
+        clSetKernelArg(kernel, 7, localMemSizeH, null);
 
-        // Execute kernel with 2D NDRange (one work item per pixel)
-        long[] globalWorkSize = new long[]{width, height};
-        clEnqueueNDRangeKernel(commandQueue, kernel, 2, null, globalWorkSize, null, 0, null, null);
+        clEnqueueNDRangeKernel(commandQueue, kernel, 2, null,
+                globalWorkSize, localWorkSizeH, 0, null, null);
 
-        // Read results back from GPU
-        clEnqueueReadBuffer(commandQueue, outputBuffer, CL_TRUE, 0, pixelBufferSize, ptrOutputPixels, 0, null, null);
+        // Pass 2: vertical blur (work group = one column)
+        long[] localWorkSizeV = new long[]{1, height};
+        long localMemSizeV = (long) height * 4;
 
-        // Convert byte[] RGBA back to int[] ARGB and save
+        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(intermediateBuffer));
+        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputBuffer));
+        clSetKernelArg(kernel, 6, Sizeof.cl_int, Pointer.to(new int[]{0}));
+        clSetKernelArg(kernel, 7, localMemSizeV, null);
+
+        clEnqueueNDRangeKernel(commandQueue, kernel, 2, null,
+                globalWorkSize, localWorkSizeV, 0, null, null);
+
+        clEnqueueReadBuffer(commandQueue, outputBuffer, CL_TRUE, 0,
+                pixelBufferSize, Pointer.to(outputPixels), 0, null, null);
+
         int[] resultPixels = new int[width * height];
         for (int i = 0; i < resultPixels.length; i++) {
             int r = outputPixels[i * 4]     & 0xFF;
@@ -123,7 +162,9 @@ public class SimpleGaussianBlur {
 
         // Cleanup
         clReleaseMemObject(inputBuffer);
+        clReleaseMemObject(intermediateBuffer);
         clReleaseMemObject(outputBuffer);
+        clReleaseMemObject(filterBuffer);
         clReleaseKernel(kernel);
         clReleaseProgram(program);
         clReleaseCommandQueue(commandQueue);
