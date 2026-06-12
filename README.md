@@ -47,13 +47,13 @@ If you see `0 Plattformen`, your GPU drivers are missing or do not expose an Ope
 ### Windows (Command Prompt or PowerShell)
 
 ```cmd
-mvn compile exec:java -Dexec.mainClass="at.fhtw.SimpleGaussianBlur"
+mvn compile exec:java -Dexec.mainClass="at.fhtw.OptimizedGaussianBlur"
 ```
 
 ### macOS / Linux
 
 ```bash
-mvn compile exec:java -Dexec.mainClass="at.fhtw.SimpleGaussianBlur"
+mvn compile exec:java -Dexec.mainClass="at.fhtw.OptimizedGaussianBlur"
 ```
 
 The blurred image will be saved in the `output` directory.
