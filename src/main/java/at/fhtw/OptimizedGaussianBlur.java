@@ -1,25 +1,32 @@
 package at.fhtw;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import org.jocl.*;
 import static org.jocl.CL.*;
 
-public class SimpleGaussianBlur {
+public class OptimizedGaussianBlur {
 
-    private static final int KERNEL_SIZE = 9;
+
 
     private static final float[] GAUSSIAN_KERNEL_1D = {
-        0.028532f, 0.067234f, 0.124009f, 0.179044f, 0.202363f,
-        0.179044f, 0.124009f, 0.067234f, 0.028532f
+            0.028532f, 0.067234f, 0.124009f, 0.179044f, 0.202363f,
+            0.179044f, 0.124009f, 0.067234f, 0.028532f
     };
+
+    private static final int KERNEL_SIZE = GAUSSIAN_KERNEL_1D.length;
 
     public static void main(String[] args) {
         String inputPath = "input/shuttle.jpg";
         String outputPath = "output/shuttle_blurred.jpg";
 
-        // Load input image
+
+
+
+
         BufferedImage image = null;
         try {
             image = ImageIO.read(new File(inputPath));
@@ -36,19 +43,10 @@ public class SimpleGaussianBlur {
         int height = image.getHeight();
         System.out.println("Image loaded: " + width + "x" + height);
 
-        // Convert int[] ARGB to byte[] RGBA for the kernel
-        int[] argbPixels = image.getRGB(0, 0, width, height, null, 0, width);
-        byte[] inputPixels = new byte[width * height * 4];
-        for (int i = 0; i < argbPixels.length; i++) {
-            int pixel = argbPixels[i];
-            inputPixels[i * 4]     = (byte) ((pixel >> 16) & 0xFF);
-            inputPixels[i * 4 + 1] = (byte) ((pixel >> 8) & 0xFF);
-            inputPixels[i * 4 + 2] = (byte) (pixel & 0xFF);
-            inputPixels[i * 4 + 3] = (byte) ((pixel >> 24) & 0xFF);
-        }
-        byte[] outputPixels = new byte[width * height * 4];
 
-        // OpenCL setup
+
+
+
         CL.setExceptionsEnabled(true);
 
         int[] numPlatformsArray = new int[1];
@@ -71,23 +69,6 @@ public class SimpleGaussianBlur {
         clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevicesArray[0], devices, null);
         cl_device_id device = devices[0];
 
-        long[] maxWorkGroupSize = new long[1];
-        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.cl_long, Pointer.to(maxWorkGroupSize), null);
-        System.out.println("Max work group size: " + maxWorkGroupSize[0]);
-
-        if (width > maxWorkGroupSize[0]) {
-            System.err.println("Image width (" + width
-                    + ") exceeds max work group size (" + maxWorkGroupSize[0]
-                    + "). Cannot process this image.");
-            return;
-        }
-        if (height > maxWorkGroupSize[0]) {
-            System.err.println("Image height (" + height
-                    + ") exceeds max work group size (" + maxWorkGroupSize[0]
-                    + "). Cannot process this image.");
-            return;
-        }
-
         cl_context context = clCreateContext(null, 1, new cl_device_id[]{device}, null, null, null);
         cl_command_queue commandQueue = clCreateCommandQueue(context, device, 0, null);
 
@@ -96,6 +77,52 @@ public class SimpleGaussianBlur {
         clBuildProgram(program, 0, null, null, null, null);
 
         cl_kernel kernel = clCreateKernel(program, "gaussianBlur1D", null);
+
+
+        long[] maxWorkGroupSize = new long[1];
+        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.size_t,
+                Pointer.to(maxWorkGroupSize), null);
+
+        long[] maxWorkItemSizes = new long[3];
+        clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, 3 * Sizeof.size_t,
+                Pointer.to(maxWorkItemSizes), null);
+
+        long[] kernelWorkGroupSize = new long[1];
+        clGetKernelWorkGroupInfo(kernel, device, CL_KERNEL_WORK_GROUP_SIZE, Sizeof.size_t,
+                Pointer.to(kernelWorkGroupSize), null);
+
+        long limitW = Math.min(maxWorkGroupSize[0], Math.min(maxWorkItemSizes[0], kernelWorkGroupSize[0]));
+        long limitH = Math.min(maxWorkGroupSize[0], Math.min(maxWorkItemSizes[1], kernelWorkGroupSize[0]));
+        System.out.println("Max row work group size: " + limitW
+                + ", max column work group size: " + limitH);
+
+
+        //tga image was too big to run on a basic intel igpu without resizing
+        if (limitW < 1 || limitH < 1) {
+            System.err.println("Work group requirements cannot be met ");
+            return;
+        }
+        if (width > limitW || height > limitH) {
+            double scale = Math.min((double) limitW / width, (double) limitH / height);
+            int newWidth = Math.max(1, (int) Math.min((long) Math.floor(width * scale), limitW));
+            int newHeight = Math.max(1, (int) Math.min((long) Math.floor(height * scale), limitH));
+            System.out.println("Image " + width + "x" + height
+                    + " exceeds work group limits, downscaling to " + newWidth + "x" + newHeight);
+            image = downscale(image, newWidth, newHeight);
+            width = newWidth;
+            height = newHeight;
+        }
+
+        int[] argbPixels = image.getRGB(0, 0, width, height, null, 0, width);
+        byte[] inputPixels = new byte[width * height * 4];
+        for (int i = 0; i < argbPixels.length; i++) {
+            int pixel = argbPixels[i];
+            inputPixels[i * 4]     = (byte) ((pixel >> 16) & 0xFF);
+            inputPixels[i * 4 + 1] = (byte) ((pixel >> 8) & 0xFF);
+            inputPixels[i * 4 + 2] = (byte) (pixel & 0xFF);
+            inputPixels[i * 4 + 3] = (byte) ((pixel >> 24) & 0xFF);
+        }
+        byte[] outputPixels = new byte[width * height * 4];
 
         long pixelBufferSize = (long) width * height * 4;
 
@@ -111,7 +138,8 @@ public class SimpleGaussianBlur {
 
         long[] globalWorkSize = new long[]{width, height};
 
-        // Pass 1: horizontal blur (work group = one row)
+
+        // blurs horizontally
         long[] localWorkSizeH = new long[]{width, 1};
         long localMemSizeH = (long) width * 4;
 
@@ -127,7 +155,10 @@ public class SimpleGaussianBlur {
         clEnqueueNDRangeKernel(commandQueue, kernel, 2, null,
                 globalWorkSize, localWorkSizeH, 0, null, null);
 
-        // Pass 2: vertical blur (work group = one column)
+
+
+
+        // blurs horizontally
         long[] localWorkSizeV = new long[]{1, height};
         long localMemSizeV = (long) height * 4;
 
@@ -160,7 +191,6 @@ public class SimpleGaussianBlur {
             System.err.println("Error saving output image: " + e.getMessage());
         }
 
-        // Cleanup
         clReleaseMemObject(inputBuffer);
         clReleaseMemObject(intermediateBuffer);
         clReleaseMemObject(outputBuffer);
@@ -169,6 +199,15 @@ public class SimpleGaussianBlur {
         clReleaseProgram(program);
         clReleaseCommandQueue(commandQueue);
         clReleaseContext(context);
+    }
+
+    private static BufferedImage downscale(BufferedImage src, int targetWidth, int targetHeight) {
+        BufferedImage dst = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = dst.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, 0, 0, targetWidth, targetHeight, null);
+        g.dispose();
+        return dst;
     }
 
     private static String readKernelSource(String filePath) {

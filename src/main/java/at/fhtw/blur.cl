@@ -1,26 +1,16 @@
 __kernel void gaussianBlur2D(__global const unsigned char* inputImage,
                              __global unsigned char* outputImage,
                              const int width,
-                             const int height)
+                             const int height,
+                             __global const float* filterKernel,
+                             const int kernelSize)
 {
     int x = get_global_id(0);
     int y = get_global_id(1);
 
     if (x >= width || y >= height) return;
 
-    const float kernelValues[81] = {
-   0.010648, 0.011247, 0.011695, 0.011972, 0.012066, 0.011972, 0.011695, 0.011247, 0.010648,
-   0.011247, 0.011879, 0.012352, 0.012645, 0.012744, 0.012645, 0.012352, 0.011879, 0.011247,
-   0.011695, 0.012352, 0.012844, 0.013149, 0.013252, 0.013149, 0.012844, 0.012352, 0.011695,
-   0.011972, 0.012645, 0.013149, 0.013461, 0.013566, 0.013461, 0.013149, 0.012645, 0.011972,
-   0.012066, 0.012744, 0.013252, 0.013566, 0.013673, 0.013566, 0.013252, 0.012744, 0.012066,
-   0.011972, 0.012645, 0.013149, 0.013461, 0.013566, 0.013461, 0.013149, 0.012645, 0.011972,
-   0.011695, 0.012352, 0.012844, 0.013149, 0.013252, 0.013149, 0.012844, 0.012352, 0.011695,
-   0.011247, 0.011879, 0.012352, 0.012645, 0.012744, 0.012645, 0.012352, 0.011879, 0.011247,
-   0.010648, 0.011247, 0.011695, 0.011972, 0.012066, 0.011972, 0.011695, 0.011247, 0.010648,
-    };
-
-    int radius = 4;
+    int radius = kernelSize / 2;
     float sumR = 0.0f, sumG = 0.0f, sumB = 0.0f;
 
     for (int ky = -radius; ky <= radius; ky++) {
@@ -45,8 +35,8 @@ __kernel void gaussianBlur2D(__global const unsigned char* inputImage,
 
             int inputIndex = (targetY * width + targetX) * 4;
 
-            int kernelIndex = (ky + radius) * 9 + (kx + radius);
-            float weight = kernelValues[kernelIndex];
+            int kernelIndex = (ky + radius) * kernelSize + (kx + radius);
+            float weight = filterKernel[kernelIndex];
 
             sumR += (float)inputImage[inputIndex + 0] * weight;
             sumG += (float)inputImage[inputIndex + 1] * weight;
@@ -55,9 +45,13 @@ __kernel void gaussianBlur2D(__global const unsigned char* inputImage,
     }
 
     int outputIndex = (y * width + x) * 4;
-    outputImage[outputIndex + 0] = (unsigned char)sumR;
-    outputImage[outputIndex + 1] = (unsigned char)sumG;
-    outputImage[outputIndex + 2] = (unsigned char)sumB;
+
+
+
+    // brightness preservation
+    outputImage[outputIndex + 0] = (unsigned char)(sumR + 0.5f);
+    outputImage[outputIndex + 1] = (unsigned char)(sumG + 0.5f);
+    outputImage[outputIndex + 2] = (unsigned char)(sumB + 0.5f);
     outputImage[outputIndex + 3] = inputImage[outputIndex + 3];
 }
 
@@ -117,8 +111,11 @@ __kernel void gaussianBlur1D(__global const unsigned char* inputImage,
     }
 
     int outputIndex = (y * width + x) * 4;
-    outputImage[outputIndex + 0] = (unsigned char)sumR;
-    outputImage[outputIndex + 1] = (unsigned char)sumG;
-    outputImage[outputIndex + 2] = (unsigned char)sumB;
+
+
+    // brightness preservation
+    outputImage[outputIndex + 0] = (unsigned char)(sumR + 0.5f);
+    outputImage[outputIndex + 1] = (unsigned char)(sumG + 0.5f);
+    outputImage[outputIndex + 2] = (unsigned char)(sumB + 0.5f);
     outputImage[outputIndex + 3] = localPixels[localBase + 3];
 }
